@@ -17,18 +17,38 @@ jobs:
         shell: pwsh
  
     steps:
-      - name: Configure Core RDP Settings
+      - name: Configure Core RDP Settings (Run as SYSTEM)
+        shell: cmd
         run: |
-          # ✅ الإصلاح: استخدام reg add بدلاً من Set-ItemProperty لتجنب مشكلة الصلاحيات
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 0 /f
+          :: تشغيل الأوامر كـ SYSTEM عبر Scheduled Task لتجاوز مشكلة الصلاحيات
+          schtasks /create /tn "EnableRDP" /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /tr "cmd /c reg add \"HKLM\System\CurrentControlSet\Control\Terminal Server\" /v fDenyTSConnections /t REG_DWORD /d 0 /f" /f
+          schtasks /run /tn "EnableRDP"
+          timeout /t 3
  
+          schtasks /create /tn "EnableRDP2" /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /tr "cmd /c reg add \"HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp\" /v UserAuthentication /t REG_DWORD /d 0 /f" /f
+          schtasks /run /tn "EnableRDP2"
+          timeout /t 3
+ 
+          schtasks /create /tn "EnableRDP3" /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /tr "cmd /c reg add \"HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp\" /v SecurityLayer /t REG_DWORD /d 0 /f" /f
+          schtasks /run /tn "EnableRDP3"
+          timeout /t 3
+ 
+          :: فتح المنفذ في الجدار الناري
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
  
-          Restart-Service -Name TermService -Force
+          :: إعادة تشغيل خدمة RDP كـ SYSTEM
+          schtasks /create /tn "RestartRDP" /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /tr "cmd /c net stop TermService /y & net start TermService" /f
+          schtasks /run /tn "RestartRDP"
+          timeout /t 5
+ 
+          :: تنظيف الـ Tasks
+          schtasks /delete /tn "EnableRDP" /f
+          schtasks /delete /tn "EnableRDP2" /f
+          schtasks /delete /tn "EnableRDP3" /f
+          schtasks /delete /tn "RestartRDP" /f
+ 
+          echo RDP Settings configured successfully!
  
       - name: Create RDP User with Secure Password
         run: |
@@ -153,4 +173,3 @@ jobs:
               Write-Host ""
               Write-Host "All 4 sessions complete. 24-hour RDP session ended."
           }
- 
